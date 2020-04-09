@@ -156,7 +156,7 @@ def load_tf_weights_in_xlnet(model, config, tf_path):
             logger.info("Transposing")
             array = np.transpose(array)
         if isinstance(pointer, list):
-            # Here we will split the TF weights
+            # Here we will split the TF weigths
             assert len(pointer) == array.shape[0]
             for i, p_i in enumerate(pointer):
                 arr_i = array[i, ...]
@@ -935,7 +935,7 @@ class XLNetLMHeadModel(XLNetPreTrainedModel):
     def get_output_embeddings(self):
         return self.lm_loss
 
-    def prepare_inputs_for_generation(self, input_ids, past, **model_kwargs):
+    def prepare_inputs_for_generation(self, input_ids, **model_kwargs):
         # Add dummy token at the end (no attention on this one)
 
         effective_batch_size = input_ids.shape[0]
@@ -958,8 +958,8 @@ class XLNetLMHeadModel(XLNetPreTrainedModel):
         inputs = {"input_ids": input_ids, "perm_mask": perm_mask, "target_mapping": target_mapping}
 
         # if past is defined in model kwargs then use it for faster decoding
-        if past:
-            inputs["mems"] = past
+        if "past" in model_kwargs and model_kwargs["past"]:
+            inputs["mems"] = model_kwargs["past"]
 
         return inputs
 

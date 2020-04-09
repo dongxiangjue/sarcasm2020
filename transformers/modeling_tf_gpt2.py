@@ -29,10 +29,8 @@ from .modeling_tf_utils import (
     TFSequenceSummary,
     TFSharedEmbeddings,
     get_initializer,
-    keras_serializable,
     shape_list,
 )
-from .tokenization_utils import BatchEncoding
 
 
 logger = logging.getLogger(__name__)
@@ -41,7 +39,6 @@ TF_GPT2_PRETRAINED_MODEL_ARCHIVE_MAP = {
     "gpt2": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-tf_model.h5",
     "gpt2-medium": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-medium-tf_model.h5",
     "gpt2-large": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-large-tf_model.h5",
-    "gpt2-xl": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-xl-tf_model.h5",
     "distilgpt2": "https://s3.amazonaws.com/models.huggingface.co/bert/distilgpt2-tf_model.h5",
 }
 
@@ -142,10 +139,10 @@ class TFAttention(tf.keras.layers.Layer):
         key = self.split_heads(key)
         value = self.split_heads(value)
         if layer_past is not None:
-            past_key, past_value = tf.unstack(layer_past, axis=0)
+            past_key, past_value = tf.unstack(layer_past, axis=1)
             key = tf.concat([past_key, key], axis=-2)
             value = tf.concat([past_value, value], axis=-2)
-        present = tf.stack([key, value], axis=0)
+        present = tf.stack([key, value], axis=1)
 
         attn_outputs = self._attn([query, key, value, attention_mask, head_mask], training=training)
         a = attn_outputs[0]
@@ -199,10 +196,7 @@ class TFBlock(tf.keras.layers.Layer):
         return outputs  # x, present, (attentions)
 
 
-@keras_serializable
 class TFGPT2MainLayer(tf.keras.layers.Layer):
-    config_class = GPT2Config
-
     def __init__(self, config, *inputs, **kwargs):
         super().__init__(*inputs, **kwargs)
         self.output_hidden_states = config.output_hidden_states
@@ -256,7 +250,7 @@ class TFGPT2MainLayer(tf.keras.layers.Layer):
             head_mask = inputs[5] if len(inputs) > 5 else head_mask
             inputs_embeds = inputs[6] if len(inputs) > 6 else inputs_embeds
             assert len(inputs) <= 7, "Too many inputs."
-        elif isinstance(inputs, (dict, BatchEncoding)):
+        elif isinstance(inputs, dict):
             input_ids = inputs.get("input_ids")
             past = inputs.get("past", past)
             attention_mask = inputs.get("attention_mask", attention_mask)
@@ -505,13 +499,6 @@ class TFGPT2LMHeadModel(TFGPT2PreTrainedModel):
 
     def get_output_embeddings(self):
         return self.transformer.wte
-
-    def prepare_inputs_for_generation(self, inputs, past, **kwargs):
-        # only last token for inputs_ids if past is defined in kwargs
-        if past:
-            inputs = tf.expand_dims(inputs[:, -1], -1)
-
-        return {"inputs": inputs, "past": past}
 
     @add_start_docstrings_to_callable(GPT2_INPUTS_DOCSTRING)
     def call(self, inputs, **kwargs):

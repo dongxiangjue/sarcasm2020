@@ -149,10 +149,9 @@ class TransfoXLConfig(PretrainedConfig):
         proj_init_std=0.01,
         init_std=0.02,
         layer_norm_epsilon=1e-5,
-        eos_token_id=0,
         **kwargs
     ):
-        super().__init__(eos_token_id=eos_token_id, **kwargs)
+        super().__init__(**kwargs)
 
         self.vocab_size = vocab_size
         self.cutoffs = []

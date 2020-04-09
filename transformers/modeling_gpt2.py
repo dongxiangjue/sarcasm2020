@@ -24,7 +24,7 @@ import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 
-from .activations import ACT2FN
+from .activations import gelu_new
 from .configuration_gpt2 import GPT2Config
 from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
 from .modeling_utils import Conv1D, PreTrainedModel, SequenceSummary, prune_conv1d_layer
@@ -104,10 +104,7 @@ class Attention(nn.Module):
         n_state = nx  # in Attention: n_state=768 (nx=n_embd)
         # [switch nx => n_state from Block to Attention to keep identical to TF implem]
         assert n_state % config.n_head == 0
-        self.register_buffer(
-            "bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8)).view(1, 1, n_ctx, n_ctx)
-        )
-        self.register_buffer("masked_bias", torch.tensor(-1e4))
+        self.register_buffer("bias", torch.tril(torch.ones(n_ctx, n_ctx)).view(1, 1, n_ctx, n_ctx))
         self.n_head = config.n_head
         self.split_size = n_state
         self.scale = scale
@@ -145,8 +142,8 @@ class Attention(nn.Module):
         if self.scale:
             w = w / math.sqrt(v.size(-1))
         nd, ns = w.size(-2), w.size(-1)
-        mask = self.bias[:, :, ns - nd : ns, :ns]
-        w = torch.where(mask, w, self.masked_bias)
+        b = self.bias[:, :, ns - nd : ns, :ns]
+        w = w * b - 1e4 * (1 - b)
 
         if attention_mask is not None:
             # Apply the attention mask
@@ -206,7 +203,7 @@ class MLP(nn.Module):
         nx = config.n_embd
         self.c_fc = Conv1D(n_state, nx)
         self.c_proj = Conv1D(nx, n_state)
-        self.act = ACT2FN[config.activation_function]
+        self.act = gelu_new
         self.dropout = nn.Dropout(config.resid_pdrop)
 
     def forward(self, x):
@@ -405,10 +402,8 @@ class GPT2Model(GPT2PreTrainedModel):
         elif input_ids is not None:
             input_shape = input_ids.size()
             input_ids = input_ids.view(-1, input_shape[-1])
-            batch_size = input_ids.shape[0]
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
-            batch_size = inputs_embeds.shape[0]
         else:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
@@ -429,7 +424,7 @@ class GPT2Model(GPT2PreTrainedModel):
 
         # Attention mask.
         if attention_mask is not None:
-            assert batch_size > 0, "batch_size has to be defined and > 0"
+            batch_size = input_ids.shape[0]
             attention_mask = attention_mask.view(batch_size, -1)
             # We create a 3D attention mask from a 2D tensor mask.
             # Sizes are [batch_size, 1, 1, to_seq_length]
@@ -530,12 +525,14 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
     def get_output_embeddings(self):
         return self.lm_head
 
-    def prepare_inputs_for_generation(self, input_ids, past, **kwargs):
+    def prepare_inputs_for_generation(self, input_ids, **kwargs):
         # only last token for inputs_ids if past is defined in kwargs
-        if past:
+        if "past" in kwargs and kwargs["past"]:
             input_ids = input_ids[:, -1].unsqueeze(-1)
 
-        return {"input_ids": input_ids, "past": past}
+        inputs = {"input_ids": input_ids}
+        inputs.update(kwargs)
+        return inputs
 
     @add_start_docstrings_to_callable(GPT2_INPUTS_DOCSTRING)
     def forward(
